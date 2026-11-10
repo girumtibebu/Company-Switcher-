@@ -50,6 +50,12 @@
 		save([...picked]);
 	}
 
+	// A check mark in the label marks the companies in use; the menu's own highlight is too faint
+	// to read as a tick when everything is picked.
+	const CHECKED = "\u2713\u00A0";
+	const UNCHECKED = "\u2003";
+	const mark = (on) => (on ? CHECKED : UNCHECKED);
+
 	function company_rows() {
 		const scope = new Set(state.scope || []);
 		const all = leaves().map((c) => c.name);
@@ -57,7 +63,7 @@
 		const rows = [
 			{
 				name: "company-all",
-				label: __("All companies"),
+				label: mark(everything) + __("All companies"),
 				icon: "building-2",
 				selected: everything,
 				onclick: () => save(all),
@@ -71,7 +77,7 @@
 			const text = company.is_group ? company.name : `${company.abbr ? company.abbr + " · " : ""}${company.name}`;
 			rows.push({
 				name: `company-${company.name}`,
-				label: indent + text,
+				label: indent + mark(selected) + text,
 				icon: company.is_group ? "folder" : "building",
 				selected,
 				onclick: () => toggle(company),
