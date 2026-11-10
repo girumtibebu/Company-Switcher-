@@ -101,7 +101,9 @@
 				icon: "building",
 				submenu: company_rows(),
 			};
-			return [{ group: "", options: [row] }, ...groups];
+			// Sits under the Modules / Apps section and above Edit Sidebar.
+			const at = Math.min(1, groups.length);
+			return [...groups.slice(0, at), { group: "", options: [row] }, ...groups.slice(at)];
 		};
 		Header.prototype.__company_switcher = true;
 	}
