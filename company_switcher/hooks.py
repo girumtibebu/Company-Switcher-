@@ -10,7 +10,6 @@ app_license = "mit"
 required_apps = ["erpnext"]
 
 app_include_js = "/assets/company_switcher/js/company_switcher.js"
-app_include_css = "/assets/company_switcher/css/company_switcher.css"
 
 boot_session = "company_switcher.company_scope.boot_session"
 

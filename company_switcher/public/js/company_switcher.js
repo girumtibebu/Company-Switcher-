@@ -1,21 +1,22 @@
-// Company switcher at the top left of Desk.
+// Company switcher, as a row in the sidebar header menu (the menu at the top of the sidebar).
 //
-// Tick the companies to work in: lists, link searches and list-based reports show only
-// their records. Users with access to a single company see it, but cannot switch.
-// The choice is saved on the server (company_switcher.company_scope).
+// The row shows the companies in use and opens a submenu of companies, grouped as the company
+// tree is. Ticking a row toggles that company, ticking a group toggles every company under it,
+// and "All companies" picks everything. The choice is saved on the server
+// (company_switcher.company_scope) and the page reloads so lists pick it up.
+//
+// Users with access to a single company don't get the row.
 (function () {
 	const METHOD = "company_switcher.company_scope.";
 	let state = null;
-	let $pill = null;
-	let $panel = null;
 
 	const leaves = () => state.companies.filter((c) => !c.is_group);
-	const children = (name) => state.companies.filter((c) => c.parent === name);
-	function leaves_under(name) {
-		return children(name).flatMap((c) => (c.is_group ? leaves_under(c.name) : [c.name]));
-	}
+	const leaves_under = (name) => {
+		const children = state.companies.filter((c) => c.parent === name);
+		return children.flatMap((c) => (c.is_group ? leaves_under(c.name) : [c.name]));
+	};
 
-	// "All companies", a group's name when exactly its companies are picked, one name, or abbreviations.
+	// "All companies", a group's name when exactly its companies are in use, one name, or abbreviations.
 	function label(scope) {
 		const all = leaves();
 		if (all.length === 1) return all[0].name;
@@ -32,111 +33,77 @@
 		return scope.map((name) => abbr[name]).join(" + ");
 	}
 
-	function render_pill() {
-		if (!leaves().length) return;
-		const single = leaves().length === 1;
-		const text = label(state.scope || []);
-		const html = `
-			<button type="button" class="company-switcher btn-reset ${single ? "is-single" : ""}"
-				title="${frappe.utils.escape_html(single ? text : __("Switch company"))}">
-				<span class="company-switcher-icon">${frappe.utils.icon("building", "sm")}</span>
-				<span class="company-switcher-label">${frappe.utils.escape_html(text)}</span>
-				${single ? "" : `<span class="company-switcher-caret">${frappe.utils.icon("chevron-down", "xs")}</span>`}
-			</button>`;
-		if ($pill) $pill.remove();
-		$pill = $(html);
-		if (!single) $pill.on("click", (e) => (e.preventDefault(), e.stopPropagation(), toggle_panel()));
-		mount();
+	function save(companies) {
+		frappe.call(METHOD + "set_scope", { companies }).then(() => window.location.reload());
 	}
 
-	// Top left of the screen: under the sidebar header on the v16 desk, in the navbar on older layouts.
-	function mount() {
-		if (!$pill || document.body.contains($pill[0])) return;
-		const $sidebar_header = $(".body-sidebar .sidebar-header").first();
-		const $brand = $(".navbar .navbar-brand, .navbar .navbar-home").first();
-		if ($sidebar_header.length) {
-			$pill.addClass("in-sidebar").insertAfter($sidebar_header);
-		} else if ($brand.length) {
-			$pill.addClass("in-navbar").insertAfter($brand);
-		} else {
-			$pill.addClass("is-floating").appendTo(document.body);
-		}
-	}
-
-	function toggle_panel() {
-		if ($panel) return close_panel();
-		const chosen = new Set(state.scope || []);
-		const rows = state.companies
-			.map((c) => {
-				const pad = 6 + c.depth * 18;
-				const checked = c.is_group ? leaves_under(c.name).every((n) => chosen.has(n)) : chosen.has(c.name);
-				return `
-				<label class="company-switcher-row ${c.is_group ? "is-group" : ""}" style="padding-left:${pad}px">
-					<input type="checkbox" data-company="${frappe.utils.escape_html(c.name)}"
-						data-group="${c.is_group ? 1 : 0}" ${checked ? "checked" : ""}>
-					<span class="company-switcher-abbr">${frappe.utils.escape_html(c.abbr || "")}</span>
-					<span>${frappe.utils.escape_html(c.name)}</span>
-				</label>`;
-			})
-			.join("");
-		$panel = $(`
-			<div class="company-switcher-panel" role="dialog" aria-label="${__("Companies")}">
-				<div class="company-switcher-title">${__("Show data from")}</div>
-				<div class="company-switcher-list">${rows}</div>
-				<div class="company-switcher-actions">
-					<button type="button" class="btn btn-xs btn-default" data-action="all">${__("All")}</button>
-					<button type="button" class="btn btn-xs btn-primary" data-action="apply">${__("Apply")}</button>
-				</div>
-			</div>`).appendTo(document.body);
-		const rect = $pill[0].getBoundingClientRect();
-		$panel.css({ top: rect.bottom + 6, left: Math.max(8, rect.left) });
-		$panel.on("click", (e) => e.stopPropagation());
-		$panel.on("change", "input", (e) => {
-			const $box = $(e.currentTarget);
-			if ($box.data("group")) {
-				// a group ticks or unticks everything under it
-				const under = new Set(leaves_under($box.data("company")));
-				$panel.find("input").each((_, el) => {
-					if (under.has(el.dataset.company)) el.checked = $box.prop("checked");
-				});
-			}
-			sync_groups();
-		});
-		$panel.find('[data-action="all"]').on("click", () => $panel.find("input").prop("checked", true));
-		$panel.find('[data-action="apply"]').on("click", apply);
-		sync_groups();
-		setTimeout(() => $(document).one("click", close_panel));
-	}
-
-	// A group box is ticked when all its companies are, half-ticked when some are.
-	function sync_groups() {
-		const ticked = new Set(
-			$panel.find('input[data-group="0"]:checked').map((_, el) => el.dataset.company).get()
-		);
-		$panel.find('input[data-group="1"]').each((_, el) => {
-			const under = leaves_under(el.dataset.company);
-			const count = under.filter((n) => ticked.has(n)).length;
-			el.checked = under.length > 0 && count === under.length;
-			el.indeterminate = count > 0 && count < under.length;
-		});
-	}
-
-	function close_panel() {
-		if ($panel) $panel.remove();
-		$panel = null;
-	}
-
-	function apply() {
-		const companies = $panel.find('input[data-group="0"]:checked').map((_, el) => el.dataset.company).get();
-		if (!companies.length) {
+	// Ticking a company or group flips its companies; at least one company always stays in use.
+	function toggle(company) {
+		const under = company.is_group ? leaves_under(company.name) : [company.name];
+		const picked = new Set(state.scope || []);
+		const all_on = under.every((n) => picked.has(n));
+		under.forEach((n) => (all_on ? picked.delete(n) : picked.add(n)));
+		if (!picked.size) {
 			frappe.show_alert({ message: __("Pick at least one company"), indicator: "orange" });
 			return;
 		}
-		frappe.call(METHOD + "set_scope", { companies }).then(() => {
-			close_panel();
-			// lists, sidebars and defaults are all cached on the page; start fresh
-			window.location.reload();
-		});
+		save([...picked]);
+	}
+
+	// A check mark in the label marks the companies in use; the menu's own highlight is too faint
+	// to read as a tick when everything is picked.
+	const CHECKED = "\u2713\u00A0";
+	const UNCHECKED = "\u2003";
+	const mark = (on) => (on ? CHECKED : UNCHECKED);
+
+	function company_rows() {
+		const scope = new Set(state.scope || []);
+		const all = leaves().map((c) => c.name);
+		const everything = all.length > 0 && all.every((n) => scope.has(n));
+		const rows = [
+			{
+				name: "company-all",
+				label: mark(everything) + __("All companies"),
+				icon: "building-2",
+				selected: everything,
+				onclick: () => save(all),
+			},
+		];
+		for (const company of state.companies) {
+			const indent = "   ".repeat(company.depth);
+			const selected = company.is_group
+				? leaves_under(company.name).every((n) => scope.has(n))
+				: scope.has(company.name);
+			const text = company.is_group ? company.name : `${company.abbr ? company.abbr + " · " : ""}${company.name}`;
+			rows.push({
+				name: `company-${company.name}`,
+				label: indent + mark(selected) + text,
+				icon: company.is_group ? "folder" : "building",
+				selected,
+				onclick: () => toggle(company),
+			});
+		}
+		return rows;
+	}
+
+	// The sidebar header's menu is built fresh on every open, so the row is added there
+	// rather than drawn beside the header.
+	function install() {
+		const Header = window.frappe?.ui?.SidebarHeader;
+		if (!Header || Header.prototype.__company_switcher) return;
+		const original = Header.prototype.menu_items;
+		Header.prototype.menu_items = function () {
+			const groups = original.call(this);
+			if (!state || leaves().length < 2) return groups;
+			const row = {
+				name: "company-switcher",
+				label: label(state.scope || []),
+				icon: "building",
+				submenu: company_rows(),
+			};
+			return [{ group: "", options: [row] }, ...groups];
+		};
+		Header.prototype.__company_switcher = true;
 	}
 
 	// Each company prints with its own format (Company > Print Formats), not the site-wide default.
@@ -156,12 +123,8 @@
 	$(document).on("form-refresh", (_e, frm) => apply_company_print_format(frm));
 
 	$(document).on("app_ready startup", () => {
-		if (state || frappe.session.user === "Guest") return;
-		state = frappe.boot.company_switcher || null;
-		if (!state) return;
-		render_pill();
-		// the sidebar is rebuilt on some route changes; put the switcher back when that happens
-		frappe.router?.on?.("change", () => setTimeout(mount, 50));
-		new MutationObserver(() => mount()).observe(document.body, { childList: true, subtree: false });
+		if (frappe.session.user === "Guest") return;
+		state = state || frappe.boot.company_switcher || null;
+		install();
 	});
 })();
