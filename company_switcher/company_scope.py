@@ -23,7 +23,7 @@ import json
 import frappe
 from frappe import _
 
-from company_switcher.constants import PRINT_FORMAT_DOCTYPES, SCOPED_DOCTYPES
+from company_switcher.constants import NEVER_SCOPED, PRINT_FORMAT_DOCTYPES, SCOPED_DOCTYPES
 
 SCOPE_KEY = "company_switcher_scope"
 
@@ -119,19 +119,22 @@ def set_scope(companies):
 
 
 def get_scoped_doctypes():
+	"""Kept for callers that list the doctypes; the filter itself no longer needs the list."""
 	extra = frappe.get_hooks("company_switcher_doctypes") or []
 	return set(SCOPED_DOCTYPES) | set(extra)
 
 
 def get_permission_query_conditions(user=None, doctype=None):
-	"""List filter for the switcher. Nothing is added while the user sees all their companies."""
+	"""List filter, called for every doctype through the "*" hook."""
 	if not doctype or frappe.flags.ignore_company_switcher:
 		return ""
-	if doctype not in get_scoped_doctypes():
-		return ""
 	user = user or frappe.session.user
-	if user == "Guest":
+	if user == "Guest" or doctype in NEVER_SCOPED:
 		return ""
+	if doctype == "Item":
+		return _item_condition(user)
+	if doctype == "Customer":
+		return _customer_condition(user)
 	field = frappe.get_meta(doctype).get_field("company")
 	if not field or field.fieldtype != "Link" or field.options != "Company":
 		return ""
@@ -139,8 +142,51 @@ def get_permission_query_conditions(user=None, doctype=None):
 	scope = get_scope(user)
 	if set(scope) >= set(allowed):
 		return ""
-	values = ", ".join(frappe.db.escape(name) for name in scope)
-	return f"(ifnull(`tab{doctype}`.`company`, '') = '' or `tab{doctype}`.`company` in ({values}))"
+	return f"(ifnull(`tab{doctype}`.`company`, '') = '' or `tab{doctype}`.`company` in ({_sql_list(scope)}))"
+
+
+def _sql_list(values):
+	return ", ".join(frappe.db.escape(value) for value in values)
+
+
+def _sees_every_company(user):
+	"""True when the user's scope covers every trading company, so nothing needs narrowing."""
+	trading = {row.name for row in get_companies() if not row.is_group}
+	return set(get_scope(user)) >= trading
+
+
+def _item_condition(user):
+	"""An item shows when no company claims it, when a company the user picked sets it up,
+	or when a quotation of such a company uses it."""
+	if _sees_every_company(user):
+		return ""
+	companies = _sql_list(get_scope(user))
+	return (
+		"(not exists (select 1 from `tabItem Default` d where d.parent = `tabItem`.`name`"
+		" and ifnull(d.company, '') != '')"
+		f" or exists (select 1 from `tabItem Default` d where d.parent = `tabItem`.`name`"
+		f" and d.company in ({companies}))"
+		" or exists (select 1 from `tabQuotation Item` qi join `tabQuotation` q on q.name = qi.parent"
+		f" where qi.item_code = `tabItem`.`name` and q.company in ({companies})))"
+	)
+
+
+def _customer_condition(user):
+	"""A customer shows when it has no sales yet, or has a quotation, order or invoice of a company the user picked."""
+	if _sees_every_company(user):
+		return ""
+	companies = _sql_list(get_scope(user))
+	parties = (("Quotation", "party_name"), ("Sales Order", "customer"), ("Sales Invoice", "customer"))
+	no_sales = " and ".join(
+		f"not exists (select 1 from `tab{doctype}` x where x.`{field}` = `tabCustomer`.`name`)"
+		for doctype, field in parties
+	)
+	in_scope = " or ".join(
+		f"exists (select 1 from `tab{doctype}` x where x.`{field}` = `tabCustomer`.`name`"
+		f" and x.company in ({companies}))"
+		for doctype, field in parties
+	)
+	return f"(({no_sales}) or {in_scope})"
 
 
 def get_company_print_formats():

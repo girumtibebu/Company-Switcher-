@@ -57,3 +57,6 @@ PRINT_FORMAT_DOCTYPES = {
 	"Delivery Note": "cs_delivery_note_print_format",
 	"Purchase Order": "cs_purchase_order_print_format",
 }
+
+# Doctypes whose records are never narrowed by the switcher.
+NEVER_SCOPED = ("Company",)
