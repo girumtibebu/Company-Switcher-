@@ -1,9 +1,9 @@
 // Company switcher, as a row in the sidebar header menu (the menu at the top of the sidebar).
 //
-// The row shows the companies in use and opens a submenu of companies, grouped as the company
-// tree is. Ticking a row toggles that company, ticking a group toggles every company under it,
-// and "All companies" picks everything. The choice is saved on the server
-// (company_switcher.company_scope) and the page reloads so lists pick it up.
+// The row is titled "Companies" and opens a submenu: "All" at the top picks every company, and the
+// companies follow in alphabetical order, each with a toggle. Ticking a group toggles every company
+// under it. The choice is saved on the server (company_switcher.company_scope) and the page reloads
+// so lists pick it up.
 //
 // Users with access to a single company don't get the row.
 (function () {
@@ -15,23 +15,6 @@
 		const children = state.companies.filter((c) => c.parent === name);
 		return children.flatMap((c) => (c.is_group ? leaves_under(c.name) : [c.name]));
 	};
-
-	// "All companies", a group's name when exactly its companies are in use, one name, or abbreviations.
-	function label(scope) {
-		const all = leaves();
-		if (all.length === 1) return all[0].name;
-		if (!scope.length || scope.length === all.length) return __("All companies");
-		const picked = new Set(scope);
-		const group = state.companies.find((c) => {
-			if (!c.is_group) return false;
-			const under = leaves_under(c.name);
-			return under.length === picked.size && under.every((n) => picked.has(n));
-		});
-		if (group) return group.name;
-		if (scope.length === 1) return scope[0];
-		const abbr = Object.fromEntries(all.map((c) => [c.name, c.abbr || c.name]));
-		return scope.map((name) => abbr[name]).join(" + ");
-	}
 
 	function save(companies) {
 		frappe.call(METHOD + "set_scope", { companies }).then(() => window.location.reload());
@@ -63,21 +46,20 @@
 		const rows = [
 			{
 				name: "company-all",
-				label: mark(everything) + __("All companies"),
+				label: mark(everything) + __("All"),
 				icon: "building-2",
 				selected: everything,
 				onclick: () => save(all),
 			},
 		];
-		for (const company of state.companies) {
-			const indent = "   ".repeat(company.depth);
+		const sorted = [...state.companies].sort((a, b) => a.name.localeCompare(b.name));
+		for (const company of sorted) {
 			const selected = company.is_group
 				? leaves_under(company.name).every((n) => scope.has(n))
 				: scope.has(company.name);
-			const text = company.is_group ? company.name : `${company.abbr ? company.abbr + " · " : ""}${company.name}`;
 			rows.push({
 				name: `company-${company.name}`,
-				label: indent + mark(selected) + text,
+				label: mark(selected) + company.name,
 				icon: company.is_group ? "folder" : "building",
 				selected,
 				onclick: () => toggle(company),
@@ -97,7 +79,7 @@
 			if (!state || leaves().length < 2) return groups;
 			const row = {
 				name: "company-switcher",
-				label: label(state.scope || []),
+				label: __("Companies"),
 				icon: "building",
 				submenu: company_rows(),
 			};
